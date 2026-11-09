@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Visor de discografías</title>
+<style>
+:root{--bg:#f6f5f2;--surface:#fff;--text:#1d1d1b;--muted:#6b6b66;--line:#e0ded8;--accent:#b3261e;--chip:#eceae4;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--surface:#1e1e1c;--text:#ecebe6;--muted:#9a9990;--line:#33332f;--accent:#ff6b5e;--chip:#2a2a27;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif}
+.app{display:grid;grid-template-columns:240px 1fr;min-height:100vh}
+aside{border-right:1px solid var(--line);padding:16px;background:var(--surface)}
+aside h1{font-size:16px;margin:0 0 12px;color:var(--accent);letter-spacing:.04em;text-transform:uppercase}
+#drop{border:2px dashed var(--line);border-radius:10px;padding:14px;text-align:center;color:var(--muted);cursor:pointer;font-size:13px}
+#drop.over{border-color:var(--accent);color:var(--accent)}
+#bands{list-style:none;margin:14px 0 0;padding:0}
+#bands li{padding:8px 10px;border-radius:8px;cursor:pointer}
+#bands li:hover{background:var(--chip)}
+#bands li.on{background:var(--accent);color:#fff}
+main{padding:24px;min-width:0}
+.empty{color:var(--muted);margin-top:20vh;text-align:center}
+h2{margin:0;font-size:28px}
+.sub{color:var(--muted);margin:2px 0 12px}
+.chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.chip{background:var(--chip);border-radius:99px;padding:2px 10px;font-size:12px}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px 16px;margin:14px 0}
+.box h3{margin:0 0 8px;font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.members{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:4px 16px;font-size:14px}
+.members span{color:var(--muted)}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 8px}
+.bar input,.bar select{background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font:inherit}
+.bar input{flex:1;min-width:160px}
+details.disc{background:var(--surface);border:1px solid var(--line);border-radius:10px;margin:6px 0}
+details.disc>summary{cursor:pointer;padding:10px 14px;display:flex;gap:12px;align-items:baseline;list-style:none}
+details.disc>summary::-webkit-details-marker{display:none}
+.yr{font-variant-numeric:tabular-nums;color:var(--accent);font-weight:600;min-width:84px}
+.ttl{font-weight:600;flex:1}
+.typ{font-size:12px;color:var(--muted)}
+.det{padding:4px 14px 14px;border-top:1px solid var(--line)}
+.meta{font-size:13px;color:var(--muted);margin:8px 0}
+table{border-collapse:collapse;width:100%;font-size:14px}
+td{padding:3px 6px;border-bottom:1px solid var(--line)}
+td.n{width:36px;color:var(--muted);text-align:right}
+td.d{width:56px;color:var(--muted);text-align:right;font-variant-numeric:tabular-nums}
+.cd{margin:10px 0 4px;font-size:12px;font-weight:600;color:var(--muted)}
+a{color:var(--accent)}
+@media (max-width:720px){.app{grid-template-columns:1fr}aside{border-right:0;border-bottom:1px solid var(--line)}}
+</style>
+</head>
+<body>
+<div class="app">
+<aside>
+  <h1>Metal Discos</h1>
+  <div id="drop">Arrastra aquí los JSON<br>o haz clic para elegirlos</div>
+  <input id="file" type="file" accept=".json,application/json" multiple hidden>
+  <ul id="bands"></ul>
+</aside>
+<main id="main"><p class="empty">Cargando <code>data/discografias.json</code>… Si abres este archivo en local, arrastra el JSON a la barra lateral.</p></main>
+</div>
+<script>
+const bands = [];
+let current = null;
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const dur = ms => { if(!ms) return ""; const s = Math.round(ms/1000); return Math.floor(s/60)+":"+String(s%60).padStart(2,"0"); };
+
+const drop = $("#drop"), file = $("#file");
+drop.onclick = () => file.click();
+file.onchange = () => load(file.files);
+drop.ondragover = e => { e.preventDefault(); drop.classList.add("over"); };
+drop.ondragleave = () => drop.classList.remove("over");
+drop.ondrop = e => { e.preventDefault(); drop.classList.remove("over"); load(e.dataTransfer.files); };
+
+function ingest(data){
+  const list = data.bands || (data.artist && data.discography ? [data] : null);
+  if (!list) throw new Error("formato");
+  for (const d of list){
+    const i = bands.findIndex(b => b.artist.mbid === d.artist.mbid);
+    if (i >= 0) bands[i] = d; else bands.push(d);
+    current = d.artist.mbid;
+  }
+}
+async function load(files){
+  for (const f of files){
+    try { ingest(JSON.parse(await f.text())); }
+    catch { alert("«" + f.name + "» no parece un JSON válido de este script."); }
+  }
+  bands.sort((a,b) => a.artist.name.localeCompare(b.artist.name));
+  renderList(); renderBand();
+}
+// Carga automática de la base de datos (funciona en GitHub Pages o con un servidor local)
+fetch("data/discografias.json").then(r => r.ok ? r.json() : Promise.reject()).then(db => {
+  ingest(db);
+  bands.sort((a,b) => a.artist.name.localeCompare(b.artist.name));
+  current = bands[0]?.artist.mbid;
+  renderList(); renderBand();
+}).catch(() => {});
+
+function renderList(){
+  $("#bands").innerHTML = bands.map(b =>
+    `<li data-id="${b.artist.mbid}" class="${b.artist.mbid===current?"on":""}">${esc(b.artist.name)}</li>`).join("");
+  document.querySelectorAll("#bands li").forEach(li => li.onclick = () => { current = li.dataset.id; renderList(); renderBand(); });
+}
+
+function renderBand(){
+  const b = bands.find(x => x.artist.mbid === current);
+  if (!b) return;
+  const a = b.artist;
+  const types = [...new Set(b.discography.map(d => d.primary_type).filter(Boolean))];
+  const links = Object.entries(a.links || {}).map(([k,v]) =>
+    v.map(u => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(k)}</a>`).join(" · ")).join(" · ");
+  $("#main").innerHTML = `
+    <h2>${esc(a.name)}</h2>
+    <div class="sub">${[a.country, a.begin_area || a.area, a.formed ? "desde " + a.formed : "", a.ended ? "disuelto " + (a.disbanded||"") : "", a.disambiguation].filter(Boolean).map(esc).join(" · ")}</div>
+    <div class="chips">${[...a.genres, ...a.tags].slice(0,14).map(t => `<span class="chip">${esc(t.name)}</span>`).join("")}</div>
+    ${a.members?.length ? `<div class="box"><h3>Miembros</h3><div class="members">${a.members.map(m =>
+      `<div>${esc(m.name)} <span>${esc((m.roles||[]).join(", "))} ${esc(m.begin||"")}${m.begin||m.end?"–":""}${esc(m.end|| (m.current&&m.begin?"":""))}</span></div>`).join("")}</div></div>` : ""}
+    ${links ? `<div class="box"><h3>Enlaces</h3>${links}</div>` : ""}
+    <div class="bar">
+      <input id="q" placeholder="Buscar disco o canción…">
+      <select id="t"><option value="">Todos los tipos</option>${types.map(t => `<option>${esc(t)}</option>`).join("")}</select>
+    </div>
+    <div id="list"></div>`;
+  $("#q").oninput = $("#t").onchange = () => renderDiscs(b);
+  renderDiscs(b);
+}
+
+function renderDiscs(b){
+  const q = $("#q").value.trim().toLowerCase(), t = $("#t").value;
+  const out = b.discography.filter(d => {
+    if (t && d.primary_type !== t) return false;
+    if (!q) return true;
+    return d.title.toLowerCase().includes(q) ||
+      d.releases.some(r => r.media.some(m => m.tracks.some(p => (p.title||"").toLowerCase().includes(q))));
+  }).map(d => {
+    const r = d.releases[0];
+    const types = [d.primary_type, ...(d.secondary_types||[])].filter(Boolean).join(" + ");
+    const labels = r ? r.labels.map(l => [l.name, l.catalog_number].filter(Boolean).join(" ")).filter(Boolean).join(", ") : "";
+    const meta = r ? [r.country, r.status, labels, r.barcode && "Cód. " + r.barcode, d.total_editions + " ediciones"].filter(Boolean).map(esc).join(" · ") : "";
+    const tracks = r ? r.media.map(m => `
+      ${r.media.length > 1 ? `<div class="cd">${esc(m.format||"Disco")} ${m.position}${m.title?" · "+esc(m.title):""}</div>` : ""}
+      <table>${m.tracks.map(p => `<tr><td class="n">${esc(p.number)}</td><td>${esc(p.title)}</td><td class="d">${dur(p.length_ms)}</td></tr>`).join("")}</table>`).join("") : "";
+    return `<details class="disc"${q ? " open" : ""}>
+      <summary><span class="yr">${esc(d.first_release_date||"s/f")}</span><span class="ttl">${esc(d.title)}</span><span class="typ">${esc(types)}</span></summary>
+      <div class="det"><div class="meta">${meta}</div>${tracks}</div></details>`;
+  });
+  $("#list").innerHTML = out.join("") || `<p class="empty" style="margin:30px 0">Sin resultados.</p>`;
+}
+</script>
+</body>
+</html>
